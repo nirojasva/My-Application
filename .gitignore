@@ -1,15 +1,23 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+# Archivos de la herramienta de construcción
+.gradle/
+build/
+
+# Archivos de configuración local (¡Muy importante!)
 local.properties
+.idea/caches/
+.idea/libraries/
+
+# Archivos pesados de C++ y NDK
+.cxx/
+*.externalNativeBuild
+*.o
+*.so
+
+# Archivos de modelos de IA (importante para tu investigación)
+*.bin
+*.gguf
+*.onnx
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
