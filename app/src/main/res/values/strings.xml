@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">LocalGenAI NRV</string>
+    <string name="clear_chat">Clear Chat</string>
+    <string name="init_system">Initializing secure system...\n</string>
+    <string name="message_hint">Type your message...</string>
+    <string name="send">Send</string>
+    <string name="model_label">Model:</string>
+    <string name="refresh">Refresh</string>
+    <string name="rename">Rename</string>
+    <string name="cancel">Cancel</string>
+    <string name="ok">OK</string>
+    <string name="enter_new_name">Enter new name for the model:</string>
+    <string name="info">Details</string>
+    <string name="nickname_label">Nickname:</string>
+    <string name="enter_nickname">Enter a fun nickname:</string>
+    <string name="search_hint">Search models...</string>
+</resources>
