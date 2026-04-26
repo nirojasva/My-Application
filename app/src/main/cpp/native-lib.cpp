@@ -17,6 +17,12 @@ struct llama_model* ai_model = nullptr;
 struct llama_context* ai_context = nullptr;
 struct mtmd_context* ai_vision = nullptr;
 std::mutex model_mutex;
+bool ai_stop_requested = false;
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_nicolas_llm_MainActivity_detenerGeneracionNative(JNIEnv* env, jobject thiz) {
+    ai_stop_requested = true;
+}
 
 // Helper to clear KV cache
 void clear_kv_cache(struct llama_context * ctx) {
@@ -107,6 +113,7 @@ Java_com_nicolas_llm_MainActivity_cargarModeloNative(JNIEnv* env, jobject thiz, 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_nicolas_llm_MainActivity_generarRespuestaNative(JNIEnv* env, jobject thiz, jstring mensaje_usuario, jint max_tokens) {
     std::lock_guard<std::mutex> lock(model_mutex);
+    ai_stop_requested = false;
     if (ai_model == nullptr || ai_context == nullptr) return env->NewStringUTF("Error: Engine inactive");
     const char* user_text = env->GetStringUTFChars(mensaje_usuario, nullptr);
     std::string formatted_prompt = "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n" + std::string(user_text) + "<|im_end|>\n<|im_start|>assistant\n";
@@ -134,6 +141,7 @@ Java_com_nicolas_llm_MainActivity_generarRespuestaNative(JNIEnv* env, jobject th
     int n_vocab = llama_vocab_n_tokens(vocab);
     bool is_thinking = false;
     for (int i = 0; i < max_tokens; i++) {
+        if (ai_stop_requested) break;
         auto* logits = llama_get_logits_ith(ai_context, batch.n_tokens - 1);
         float max_val = logits[0]; llama_token nuevo_token_id = 0;
         for(int j = 1; j < n_vocab; j++) { if(logits[j] > max_val) { max_val = logits[j]; nuevo_token_id = j; } }

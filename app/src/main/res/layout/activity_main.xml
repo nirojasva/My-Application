@@ -74,7 +74,7 @@
                 android:layout_height="36dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/clear_chat"
-                android:src="@android:drawable/ic_menu_delete"
+                android:src="@android:drawable/ic_input_add"
                 app:tint="@color/white" />
         </LinearLayout>
 
