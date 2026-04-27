@@ -349,7 +349,7 @@ class MainActivity : AppCompatActivity() {
 
         CoroutineScope(Dispatchers.IO).launch {
             // Reemplaza "TU_API_KEY_AQUI" con tu llave real de Google AI Studio
-            val apiKey = "AIzaSyDDAsiiozUtTg3ouX8zEQG6PRJpVhOJYnY"
+            val apiKey = "TU_API_KEY_AQUI"
             if (apiKey == "TU_API_KEY_AQUI") {
                 withContext(Dispatchers.Main) {
                     if (messages.isNotEmpty() && !messages.last().isUser) {
