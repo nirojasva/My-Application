@@ -28,6 +28,7 @@ import kotlinx.coroutines.*
 import java.io.File
 import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
+import com.nicolas.llm.BuildConfig
 import java.util.*
 
 class MainActivity : AppCompatActivity() {
@@ -348,12 +349,11 @@ class MainActivity : AppCompatActivity() {
         generationStartTime = System.currentTimeMillis()
 
         CoroutineScope(Dispatchers.IO).launch {
-            // Reemplaza "TU_API_KEY_AQUI" con tu llave real de Google AI Studio
-            val apiKey = "TU_API_KEY_AQUI"
-            if (apiKey == "TU_API_KEY_AQUI") {
+            val apiKey = BuildConfig.GEMINI_API_KEY
+            if (apiKey == "TU_API_KEY_AQUI" || apiKey.isBlank()) {
                 withContext(Dispatchers.Main) {
                     if (messages.isNotEmpty() && !messages.last().isUser) {
-                        messages.last().text = "System: API Key missing. Please add your Gemini API Key in MainActivity.kt."
+                        messages.last().text = "System: API Key missing in local.properties. Please add GEMINI_API_KEY=your_key to local.properties and Rebuild."
                         adapter.notifyItemChanged(messages.size - 1)
                     }
                     isGenerating = false
