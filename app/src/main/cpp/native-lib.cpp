@@ -4,6 +4,7 @@
 #include <android/bitmap.h>
 #include "llama.h"
 #include "mtmd.h"
+#include "mtmd-helper.h"
 #include <vector>
 #include <mutex>
 #include <dirent.h>
@@ -116,7 +117,7 @@ Java_com_nicolas_llm_MainActivity_generarRespuestaNative(JNIEnv* env, jobject th
     ai_stop_requested = false;
     if (ai_model == nullptr || ai_context == nullptr) return env->NewStringUTF("Error: Engine inactive");
     const char* user_text = env->GetStringUTFChars(mensaje_usuario, nullptr);
-    std::string formatted_prompt = "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n" + std::string(user_text) + "<|im_end|>\n<|im_start|>assistant\n";
+    std::string formatted_prompt = "<|im_start|>system\nYou are a precise and factual assistant. If you are not sure about something, say you don't know. Avoid hallucinations.<|im_end|>\n<|im_start|>user\n" + std::string(user_text) + "<|im_end|>\n<|im_start|>assistant\n";
     const char* prompt = formatted_prompt.c_str();
     jclass clase_main = env->GetObjectClass(thiz);
     jmethodID metodo_recibir = env->GetMethodID(clase_main, "recibirPalabra", "(Ljava/lang/String;)V");
@@ -140,12 +141,19 @@ Java_com_nicolas_llm_MainActivity_generarRespuestaNative(JNIEnv* env, jobject th
     std::string respuesta_final;
     int n_vocab = llama_vocab_n_tokens(vocab);
     bool is_thinking = false;
+
+    auto sparams = llama_sampler_chain_default_params();
+    struct llama_sampler * smpl = llama_sampler_chain_init(sparams);
+    llama_sampler_chain_add(smpl, llama_sampler_init_penalties(64, 1.1f, 0.0f, 0.0f));
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.95f, 1));
+    llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.4f));
+    llama_sampler_chain_add(smpl, llama_sampler_init_dist(1234));
+
     for (int i = 0; i < max_tokens; i++) {
         if (ai_stop_requested) break;
-        auto* logits = llama_get_logits_ith(ai_context, batch.n_tokens - 1);
-        float max_val = logits[0]; llama_token nuevo_token_id = 0;
-        for(int j = 1; j < n_vocab; j++) { if(logits[j] > max_val) { max_val = logits[j]; nuevo_token_id = j; } }
-        if (nuevo_token_id == llama_vocab_eos(vocab)) break;
+        const llama_token nuevo_token_id = llama_sampler_sample(smpl, ai_context, -1);
+        if (llama_vocab_is_eog(vocab, nuevo_token_id)) break;
         char buf[128];
         int n_chars = llama_token_to_piece(vocab, nuevo_token_id, buf, sizeof(buf), 0, false);
         if (n_chars > 0) {
@@ -165,6 +173,7 @@ Java_com_nicolas_llm_MainActivity_generarRespuestaNative(JNIEnv* env, jobject th
         batch.n_seq_id[0] = 1; batch.seq_id[0][0] = 0; batch.logits[0] = true;
         if (llama_decode(ai_context, batch) != 0) break;
     }
+    llama_sampler_free(smpl);
     llama_batch_free(batch); env->ReleaseStringUTFChars(mensaje_usuario, user_text);
     return env->NewStringUTF(respuesta_final.c_str());
 }
@@ -184,7 +193,7 @@ Java_com_nicolas_llm_MainActivity_generarRespuestaConImagenNative(JNIEnv* env, j
     mtmd_bitmap* mt_bmp = mtmd_bitmap_init(info.width, info.height, rgb_data.data());
     const char* user_text = env->GetStringUTFChars(mensaje_usuario, nullptr);
 
-    // Improved Prompt structure for LLaVA
+    // Improved Prompt structure for VLM
     std::string prompt_str = "USER: <__media__>\n" + std::string(user_text) + "\nASSISTANT:";
 
     mtmd_input_text input_text = { prompt_str.c_str(), true, true };
@@ -194,8 +203,10 @@ Java_com_nicolas_llm_MainActivity_generarRespuestaConImagenNative(JNIEnv* env, j
 
     clear_kv_cache(ai_context);
 
-    for (size_t i = 0; i < mtmd_input_chunks_size(chunks); i++) {
-        mtmd_encode_chunk(ai_vision, mtmd_input_chunks_get(chunks, i));
+    llama_pos n_past = 0;
+    if (mtmd_helper_eval_chunks(ai_vision, ai_context, chunks, 0, 0, 512, true, &n_past) != 0) {
+        mtmd_bitmap_free(mt_bmp); mtmd_input_chunks_free(chunks); env->ReleaseStringUTFChars(mensaje_usuario, user_text);
+        return env->NewStringUTF("Error: Failed to evaluate VLM chunks.");
     }
 
     jclass clase_main = env->GetObjectClass(thiz);
@@ -203,15 +214,18 @@ Java_com_nicolas_llm_MainActivity_generarRespuestaConImagenNative(JNIEnv* env, j
     std::string description; const struct llama_vocab* vocab = llama_model_get_vocab(ai_model);
     int n_vocab = llama_vocab_n_tokens(vocab);
 
-    llama_memory_t mem = llama_get_memory(ai_context);
-    llama_pos n_past = llama_memory_seq_pos_max(mem, 0) + 1;
+    auto sparams = llama_sampler_chain_default_params();
+    struct llama_sampler * smpl = llama_sampler_chain_init(sparams);
+    llama_sampler_chain_add(smpl, llama_sampler_init_penalties(64, 1.1f, 0.0f, 0.0f));
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.95f, 1));
+    llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.4f));
+    llama_sampler_chain_add(smpl, llama_sampler_init_dist(1234));
 
     llama_batch batch = llama_batch_init(1, 0, 1);
     for (int i = 0; i < max_tokens; i++) {
-        auto* logits = llama_get_logits(ai_context);
-        llama_token next_token = 0; float max_logit = logits[0];
-        for (int j = 1; j < n_vocab; j++) { if (logits[j] > max_logit) { max_logit = logits[j]; next_token = j; } }
-        if (next_token == llama_vocab_eos(vocab)) break;
+        const llama_token next_token = llama_sampler_sample(smpl, ai_context, -1);
+        if (llama_vocab_is_eog(vocab, next_token)) break;
         char buf[128]; int n_chars = llama_token_to_piece(vocab, next_token, buf, sizeof(buf), 0, false);
         if (n_chars > 0) {
             std::string word(buf, n_chars); if (word.find("<|im_end|>") != std::string::npos) break;
@@ -222,6 +236,8 @@ Java_com_nicolas_llm_MainActivity_generarRespuestaConImagenNative(JNIEnv* env, j
         batch.n_seq_id[0] = 1; batch.seq_id[0][0] = 0; batch.logits[0] = true;
         if (llama_decode(ai_context, batch) != 0) break;
     }
+    llama_sampler_free(smpl);
     llama_batch_free(batch); mtmd_bitmap_free(mt_bmp); mtmd_input_chunks_free(chunks); env->ReleaseStringUTFChars(mensaje_usuario, user_text);
+    return env->NewStringUTF(description.c_str());
     return env->NewStringUTF(description.c_str());
 }

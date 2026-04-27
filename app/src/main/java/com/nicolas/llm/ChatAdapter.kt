@@ -1,5 +1,8 @@
 package com.nicolas.llm
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.view.LayoutInflater
@@ -8,6 +11,7 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
 
 class ChatAdapter(private val messages: MutableList<ChatMessage>) :
@@ -52,6 +56,22 @@ class ChatAdapter(private val messages: MutableList<ChatMessage>) :
 
         fun bind(message: ChatMessage) {
             handler.removeCallbacks(dotRunnable)
+
+            itemView.setOnLongClickListener {
+                val clipboard = itemView.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val textToCopy = if (message.thought.isNotEmpty()) {
+                    "Reasoning:\n${message.thought}\n\nResponse:\n${message.text}"
+                } else {
+                    message.text
+                }
+                
+                if (textToCopy.isNotEmpty()) {
+                    val clip = ClipData.newPlainText("NRV Chat Message", textToCopy)
+                    clipboard.setPrimaryClip(clip)
+                    Toast.makeText(itemView.context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                }
+                true
+            }
 
             if (txtMessage != null) {
                 if (message.text.isNotEmpty()) {

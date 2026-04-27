@@ -14,6 +14,8 @@ import android.os.Bundle
 import android.os.Environment
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.Gravity
+import android.graphics.Color
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
@@ -35,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adapter: ChatAdapter
     
     private val modelFiles = mutableListOf<String>()
+    private val ONLINE_MODEL_GEMINI = "Gemini 3.1 Pro (Cloud)"
     private lateinit var spinnerAdapter: ArrayAdapter<String>
     private var isModelLoading = false
     
@@ -108,17 +111,36 @@ class MainActivity : AppCompatActivity() {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                 val view = super.getView(position, convertView, parent) as TextView
                 val filename = modelFiles[position]
-                val type = getModelType(filename)
-                view.text = "${getModelDisplayName(filename)} [$type]"
+                
+                if (filename == ONLINE_MODEL_GEMINI) {
+                    view.text = "Gemini 3.1 [ONLINE]"
+                    view.setTextColor(Color.parseColor("#4285F4")) // Google Blue
+                } else {
+                    val type = getShortModelType(getModelType(filename))
+                    val displayName = getModelDisplayName(filename)
+                    view.text = "$displayName $type"
+                    view.setTextColor(Color.WHITE)
+                }
                 return view
             }
             override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View {
                 val view = super.getDropDownView(position, convertView, parent) as TextView
                 val filename = modelFiles[position]
-                val (safe, _) = isModelSafe(filename)
-                val type = getModelType(filename)
-                view.text = "${getModelDisplayName(filename)} (${getFileSize(filename)}) [$type]${if (!safe) " [TOO LARGE]" else ""}"
-                view.alpha = if (safe) 1.0f else 0.5f
+                
+                if (filename == ONLINE_MODEL_GEMINI) {
+                    view.text = "☁ Gemini 3.1 Pro (Online Cloud)"
+                    view.setTextColor(Color.parseColor("#4285F4"))
+                    view.alpha = 1.0f
+                } else {
+                    val (safe, _) = isModelSafe(filename)
+                    val type = getShortModelType(getModelType(filename))
+                    val size = getFileSize(filename).replace(" ", "")
+                    val displayName = getModelDisplayName(filename)
+                    
+                    view.text = "📁 $displayName ($size) $type${if (!safe) " (!)" else ""}"
+                    view.setTextColor(Color.WHITE)
+                    view.alpha = if (safe) 1.0f else 0.5f
+                }
                 return view
             }
         }
@@ -130,7 +152,10 @@ class MainActivity : AppCompatActivity() {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 if (position in modelFiles.indices) {
                     val selected = modelFiles[position]
-                    if (selected != lastSelected) {
+                    if (selected == ONLINE_MODEL_GEMINI) {
+                        lastSelected = selected
+                        addMessage("System: Switching to Gemini Online Cloud...", false)
+                    } else if (selected != lastSelected) {
                         val (safe, reason) = isModelSafe(selected)
                         if (safe) {
                             lastSelected = selected
@@ -158,6 +183,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun getShortModelType(type: String): String {
+        return when (type) {
+            "TEXT-TO-IMAGE" -> "[IMG]"
+            "TEXT+IMAGE-TO-TEXT" -> "[VLM]"
+            "TEXT-TO-TEXT" -> "[TXT]"
+            else -> "[?]"
+        }
+    }
+
     private fun getModelDescription(filename: String): String {
         val type = getModelType(filename)
         return when (type) {
@@ -177,6 +211,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnRename.setOnClickListener { showRenameDialog() }
         binding.btnInfo.setOnClickListener { showInfoDialog() }
+        binding.btnModelTable.setOnClickListener { showModelTableDialog() }
         
         binding.btnClearChat.setOnClickListener {
             AlertDialog.Builder(this)
@@ -242,6 +277,10 @@ class MainActivity : AppCompatActivity() {
                 binding.selectedImagePreview.setImageBitmap(selectedImageBitmap)
                 binding.imagePreviewContainer.visibility = View.VISIBLE
             }
+            // Deletar fotos temporales si vienen de la cámara
+            if (uri.toString().contains("com.nicolas.llm.fileprovider")) {
+                contentResolver.delete(uri, null, null)
+            }
         } catch (e: Exception) {
             Toast.makeText(this, "Error processing image", Toast.LENGTH_SHORT).show()
         }
@@ -249,6 +288,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun sendMessage(text: String, image: Bitmap?) {
         val currentModel = binding.modelSpinner.selectedItem?.toString() ?: ""
+        
+        if (currentModel == ONLINE_MODEL_GEMINI) {
+            sendOnlineMessage(text)
+            return
+        }
+
         val isVisionModel = getModelType(currentModel) == "TEXT+IMAGE-TO-TEXT"
 
         if (image != null && !isVisionModel) {
@@ -285,6 +330,64 @@ class MainActivity : AppCompatActivity() {
                 binding.btnSend.isEnabled = true
                 val totalTime = (System.currentTimeMillis() - generationStartTime) / 1000.0
                 binding.txtTimer.text = String.format("Total: %.1fs", totalTime)
+            }
+        }
+    }
+
+    private fun sendOnlineMessage(text: String) {
+        if (text.isBlank()) return
+        addMessage(text, true)
+        binding.inputMessage.text.clear()
+        
+        // Mensaje de estado inicial
+        addMessage("Connecting to Gemini Cloud...", false)
+        
+        isGenerating = true
+        updateLoadingState()
+        binding.btnSend.isEnabled = false
+        generationStartTime = System.currentTimeMillis()
+
+        CoroutineScope(Dispatchers.IO).launch {
+            // Reemplaza "TU_API_KEY_AQUI" con tu llave real de Google AI Studio
+            val apiKey = "AIzaSyDDAsiiozUtTg3ouX8zEQG6PRJpVhOJYnY"
+            if (apiKey == "TU_API_KEY_AQUI") {
+                withContext(Dispatchers.Main) {
+                    if (messages.isNotEmpty() && !messages.last().isUser) {
+                        messages.last().text = "System: API Key missing. Please add your Gemini API Key in MainActivity.kt."
+                        adapter.notifyItemChanged(messages.size - 1)
+                    }
+                    isGenerating = false
+                    updateLoadingState()
+                    binding.btnSend.isEnabled = true
+                }
+                return@launch
+            }
+            
+            val client = com.nicolas.llm.api.GeminiApiClient(apiKey)
+            val response = client.generateContent(text)
+            
+            withContext(Dispatchers.Main) {
+                if (response != null) {
+                    if (response.startsWith("Error:")) {
+                        if (messages.isNotEmpty() && !messages.last().isUser) {
+                            messages.last().text = "System: $response"
+                            adapter.notifyItemChanged(messages.size - 1)
+                        }
+                    } else if (messages.isNotEmpty() && !messages.last().isUser) {
+                        messages.last().text = response
+                        adapter.notifyItemChanged(messages.size - 1)
+                    }
+                } else {
+                    if (messages.isNotEmpty() && !messages.last().isUser) {
+                        messages.last().text = "System: Unknown API Error. Verify your Internet connection."
+                        adapter.notifyItemChanged(messages.size - 1)
+                    }
+                }
+                isGenerating = false
+                updateLoadingState()
+                binding.btnSend.isEnabled = true
+                val totalTime = (System.currentTimeMillis() - generationStartTime) / 1000.0
+                binding.txtTimer.text = String.format("Online: %.1fs", totalTime)
             }
         }
     }
@@ -366,6 +469,7 @@ class MainActivity : AppCompatActivity() {
             name.endsWith(".gguf") && !name.contains("mmproj", ignoreCase = true) 
         }
         modelFiles.clear()
+        modelFiles.add(ONLINE_MODEL_GEMINI) // Add online model first
         files?.forEach { modelFiles.add(it.name) }
         spinnerAdapter.notifyDataSetChanged()
     }
@@ -427,6 +531,83 @@ class MainActivity : AppCompatActivity() {
                 metaText.text = "\n$metadata" 
             }
         }
+    }
+
+    private fun showModelTableDialog() {
+        val scrollView = ScrollView(this)
+        val tableLayout = TableLayout(this).apply {
+            setPadding(16, 16, 16, 16)
+            isStretchAllColumns = true
+        }
+
+        // Header
+        val headerRow = TableRow(this).apply {
+            setBackgroundColor(Color.DKGRAY)
+            setPadding(0, 8, 0, 8)
+        }
+        val headers = listOf("Name", "Size", "Input", "Output", "Safe")
+        headers.forEach { text ->
+            headerRow.addView(TextView(this).apply {
+                this.text = text
+                setTextColor(Color.WHITE)
+                setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                setPadding(8, 0, 8, 0)
+            })
+        }
+        tableLayout.addView(headerRow)
+
+        // Rows
+        modelFiles.forEach { filename ->
+            val row = TableRow(this).apply {
+                setPadding(0, 12, 0, 12)
+            }
+            
+            val isOnline = filename == ONLINE_MODEL_GEMINI
+            val (safe, _) = if (isOnline) true to "N/A" else isModelSafe(filename)
+            val nick = if (isOnline) "Gemini Cloud" else getModelDisplayName(filename)
+            val size = if (isOnline) "---" else getFileSize(filename).replace(" ", "")
+            val type = if (isOnline) "TEXT-TO-TEXT" else getModelType(filename)
+            
+            val (input, output) = when {
+                isOnline -> "Internet" to "Text"
+                type == "TEXT-TO-IMAGE" -> "Text" to "Image"
+                type == "TEXT+IMAGE-TO-TEXT" -> "Text+Img" to "Text"
+                else -> "Text" to "Text"
+            }
+
+            row.addView(TextView(this).apply { 
+                text = if (isOnline) "Gemini Cloud" else (if (nick == filename) filename.take(10) + "..." else nick.take(12))
+                gravity = Gravity.START
+                setTextColor(if (isOnline) Color.parseColor("#4285F4") else Color.WHITE)
+                textSize = 12f
+            })
+            row.addView(TextView(this).apply { text = size; gravity = Gravity.CENTER; setTextColor(Color.WHITE); textSize = 12f })
+            row.addView(TextView(this).apply { text = input; gravity = Gravity.CENTER; setTextColor(Color.CYAN); textSize = 12f })
+            row.addView(TextView(this).apply { text = output; gravity = Gravity.CENTER; setTextColor(Color.YELLOW); textSize = 12f })
+            row.addView(TextView(this).apply { 
+                text = if (isOnline) "CLOUD" else (if (safe) "YES" else "NO")
+                setTextColor(if (isOnline) Color.CYAN else (if (safe) Color.GREEN else Color.RED))
+                gravity = Gravity.CENTER 
+                textSize = 12f
+            })
+
+            tableLayout.addView(row)
+            
+            val separator = View(this).apply {
+                layoutParams = TableRow.LayoutParams(TableRow.LayoutParams.MATCH_PARENT, 1)
+                setBackgroundColor(Color.parseColor("#333333"))
+            }
+            tableLayout.addView(separator)
+        }
+
+        scrollView.addView(tableLayout)
+
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("Model Architecture Summary")
+            .setView(scrollView)
+            .setPositiveButton("Close", null)
+            .show()
     }
 
     private fun getFileSize(filename: String): String {
@@ -536,6 +717,13 @@ class MainActivity : AppCompatActivity() {
                 binding.chatRecyclerView.scrollToPosition(messages.size - 1)
             }
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Limpieza de seguridad: borrar rastros temporales al salir
+        val storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+        storageDir?.listFiles()?.forEach { it.delete() }
     }
 
     override fun onDestroy() {

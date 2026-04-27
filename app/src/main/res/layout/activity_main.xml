@@ -33,6 +33,15 @@
             android:orientation="horizontal"
             android:layout_marginBottom="8dp">
 
+            <ImageButton
+                android:id="@+id/btnModelTable"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/model_table"
+                android:src="@android:drawable/ic_menu_agenda"
+                app:tint="@color/white" />
+
             <Spinner
                 android:id="@+id/modelSpinner"
                 android:layout_width="0dp"
@@ -74,7 +83,7 @@
                 android:layout_height="36dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/clear_chat"
-                android:src="@android:drawable/ic_input_add"
+                android:src="@android:drawable/ic_menu_add"
                 app:tint="@color/white" />
         </LinearLayout>
 

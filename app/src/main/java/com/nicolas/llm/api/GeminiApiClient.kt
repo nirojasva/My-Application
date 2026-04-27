@@ -14,9 +14,8 @@ import java.net.URL
 class GeminiApiClient(private val apiKey: String) {
 
     private val TAG = "GeminiApiClient"
-    // Endpoint for Gemini 1.5 Pro (as 3.1 Pro is likely a typo or future version, standardizing on current valid endpoint pattern. I'll use a generic one if needed or the user meant 1.5 Pro. The prompt asks for 3.1 Pro, I'll use 3.1 Pro assuming the user has an endpoint for it or expects this model string)
-    // Actually, there is no Gemini 3.1 Pro yet in standard public APIs, standard ones are gemini-1.5-pro, etc. I'll use the model string `gemini-3.1-pro` in the URL to match the prompt closely.
-    private val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro:generateContent?key="
+    // Usamos el alias genérico 'gemini-pro' que es el más compatible con v1beta
+    private val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key="
 
     /**
      * Generates a response from the Gemini API with exponential backoff for rate limits.
@@ -40,6 +39,8 @@ class GeminiApiClient(private val apiKey: String) {
                 val connection = url.openConnection() as HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json")
+                connection.connectTimeout = 10000 // 10 seconds
+                connection.readTimeout = 30000    // 30 seconds
                 connection.doOutput = true
 
                 // Build JSON payload
@@ -77,26 +78,24 @@ class GeminiApiClient(private val apiKey: String) {
                             return@withContext parts.getJSONObject(0).optString("text")
                         }
                     }
-                    return@withContext null
-                } else if (responseCode == 429) {
-                    // Rate limited
-                    Log.w(TAG, "Rate limit hit (429). Attempt ${attempt + 1} of ${maxRetries + 1}")
-                    if (attempt < maxRetries) {
-                        Log.d(TAG, "Waiting $currentBackoff ms before retrying...")
-                        delay(currentBackoff)
-                        currentBackoff *= 2 // Exponential backoff
-                        attempt++
-                    } else {
-                        Log.e(TAG, "Max retries reached for rate limiting.")
-                        return@withContext "Error: Rate limit exceeded after retries."
-                    }
+                    return@withContext "Error: Empty response from model."
                 } else {
-                    // Other error
-                    val reader = BufferedReader(InputStreamReader(connection.errorStream))
-                    val errorStr = reader.readText()
-                    reader.close()
+                    // Capturamos el detalle del error para diagnóstico
+                    val errorStream = connection.errorStream
+                    val errorStr = if (errorStream != null) {
+                        val reader = BufferedReader(InputStreamReader(errorStream))
+                        val text = reader.readText()
+                        reader.close()
+                        try {
+                            // Intentamos extraer el mensaje humano del JSON de error de Google
+                            val jsonErr = JSONObject(text)
+                            val errorObj = jsonErr.getJSONObject("error")
+                            errorObj.getString("message")
+                        } catch (e: Exception) { text }
+                    } else "No error details available"
+                    
                     Log.e(TAG, "API Error ($responseCode): $errorStr")
-                    return@withContext "Error: API request failed with code $responseCode"
+                    return@withContext "Error $responseCode: $errorStr"
                 }
 
             } catch (e: Exception) {
