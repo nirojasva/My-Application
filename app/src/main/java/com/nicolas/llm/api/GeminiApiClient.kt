@@ -14,8 +14,8 @@ import java.net.URL
 class GeminiApiClient(private val apiKey: String) {
 
     private val TAG = "GeminiApiClient"
-    // Usamos el alias genérico 'gemini-pro' que es el más compatible con v1beta
-    private val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key="
+    // Usamos la ruta más completa y compatible disponible actualmente
+    private val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key="
 
     /**
      * Generates a response from the Gemini API with exponential backoff for rate limits.
@@ -32,10 +32,11 @@ class GeminiApiClient(private val apiKey: String) {
     ): String? = withContext(Dispatchers.IO) {
         var attempt = 0
         var currentBackoff = initialBackoffMs
+        val cleanApiKey = apiKey.trim() // Eliminamos posibles espacios
 
         while (attempt <= maxRetries) {
             try {
-                val url = URL(BASE_URL + apiKey)
+                val url = URL(BASE_URL + cleanApiKey)
                 val connection = url.openConnection() as HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json")
