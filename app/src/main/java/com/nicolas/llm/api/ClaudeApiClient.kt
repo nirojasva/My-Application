@@ -11,14 +11,13 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 
-class GeminiApiClient(private val apiKey: String) {
+class ClaudeApiClient(private val apiKey: String) {
 
-    private val TAG = "GeminiApiClient"
-    // Usamos la ruta más completa y compatible disponible actualmente
-    private val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key="
+    private val TAG = "ClaudeApiClient"
+    private val BASE_URL = "https://api.anthropic.com/v1/messages"
 
     /**
-     * Generates a response from the Gemini API with exponential backoff for rate limits.
+     * Generates a response from the Claude API.
      *
      * @param prompt The text prompt to send to the model.
      * @param maxRetries Maximum number of retries if a 429 Too Many Requests is encountered.
@@ -32,27 +31,28 @@ class GeminiApiClient(private val apiKey: String) {
     ): String? = withContext(Dispatchers.IO) {
         var attempt = 0
         var currentBackoff = initialBackoffMs
-        val cleanApiKey = apiKey.trim() // Eliminamos posibles espacios
+        val cleanApiKey = apiKey.trim()
 
         while (attempt <= maxRetries) {
             try {
-                val url = URL(BASE_URL + cleanApiKey)
+                val url = URL(BASE_URL)
                 val connection = url.openConnection() as HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("x-api-key", cleanApiKey)
+                connection.setRequestProperty("anthropic-version", "2023-06-01")
                 connection.connectTimeout = 10000 // 10 seconds
                 connection.readTimeout = 30000    // 30 seconds
                 connection.doOutput = true
 
                 // Build JSON payload
                 val payload = JSONObject().apply {
-                    put("contents", JSONArray().apply {
+                    put("model", "claude-3-5-sonnet-20240620")
+                    put("max_tokens", 1024)
+                    put("messages", JSONArray().apply {
                         put(JSONObject().apply {
-                            put("parts", JSONArray().apply {
-                                put(JSONObject().apply {
-                                    put("text", prompt)
-                                })
-                            })
+                            put("role", "user")
+                            put("content", prompt)
                         })
                     })
                 }
@@ -71,13 +71,9 @@ class GeminiApiClient(private val apiKey: String) {
 
                     // Parse JSON response
                     val jsonResponse = JSONObject(responseStr)
-                    val candidates = jsonResponse.optJSONArray("candidates")
-                    if (candidates != null && candidates.length() > 0) {
-                        val content = candidates.getJSONObject(0).optJSONObject("content")
-                        val parts = content?.optJSONArray("parts")
-                        if (parts != null && parts.length() > 0) {
-                            return@withContext parts.getJSONObject(0).optString("text")
-                        }
+                    val content = jsonResponse.optJSONArray("content")
+                    if (content != null && content.length() > 0) {
+                        return@withContext content.getJSONObject(0).optString("text")
                     }
                     return@withContext "Error: Empty response from model."
                 } else {
@@ -88,13 +84,12 @@ class GeminiApiClient(private val apiKey: String) {
                         val text = reader.readText()
                         reader.close()
                         try {
-                            // Intentamos extraer el mensaje humano del JSON de error de Google
                             val jsonErr = JSONObject(text)
                             val errorObj = jsonErr.getJSONObject("error")
                             errorObj.getString("message")
                         } catch (e: Exception) { text }
                     } else "No error details available"
-                    
+
                     Log.e(TAG, "API Error ($responseCode): $errorStr")
                     return@withContext "Error: $responseCode: $errorStr"
                 }

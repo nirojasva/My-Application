@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     
     private val modelFiles = mutableListOf<String>()
     private val ONLINE_MODEL_GEMINI = "Gemini 3.1 Pro (Cloud)"
+    private val ONLINE_MODEL_CLAUDE = "Claude 3.5 Sonnet (Cloud)"
     private lateinit var spinnerAdapter: ArrayAdapter<String>
     private var isModelLoading = false
     
@@ -115,6 +116,9 @@ class MainActivity : AppCompatActivity() {
                 if (filename == ONLINE_MODEL_GEMINI) {
                     view.text = "Gemini 3.1 [ONLINE]"
                     view.setTextColor(Color.parseColor("#4285F4")) // Google Blue
+                } else if (filename == ONLINE_MODEL_CLAUDE) {
+                    view.text = "Claude 3.5 [ONLINE]"
+                    view.setTextColor(Color.parseColor("#D97757")) // Anthropic Orange
                 } else {
                     val type = getShortModelType(getModelType(filename))
                     val displayName = getModelDisplayName(filename)
@@ -130,6 +134,10 @@ class MainActivity : AppCompatActivity() {
                 if (filename == ONLINE_MODEL_GEMINI) {
                     view.text = "☁ Gemini 3.1 Pro (Online Cloud)"
                     view.setTextColor(Color.parseColor("#4285F4"))
+                    view.alpha = 1.0f
+                } else if (filename == ONLINE_MODEL_CLAUDE) {
+                    view.text = "☁ Claude 3.5 Sonnet (Online Cloud)"
+                    view.setTextColor(Color.parseColor("#D97757"))
                     view.alpha = 1.0f
                 } else {
                     val (safe, _) = isModelSafe(filename)
@@ -155,6 +163,9 @@ class MainActivity : AppCompatActivity() {
                     if (selected == ONLINE_MODEL_GEMINI) {
                         lastSelected = selected
                         addMessage("System: Switching to Gemini Online Cloud...", false)
+                    } else if (selected == ONLINE_MODEL_CLAUDE) {
+                        lastSelected = selected
+                        addMessage("System: Switching to Claude Online Cloud...", false)
                     } else if (selected != lastSelected) {
                         val (safe, reason) = isModelSafe(selected)
                         if (safe) {
@@ -289,8 +300,8 @@ class MainActivity : AppCompatActivity() {
     private fun sendMessage(text: String, image: Bitmap?) {
         val currentModel = binding.modelSpinner.selectedItem?.toString() ?: ""
         
-        if (currentModel == ONLINE_MODEL_GEMINI) {
-            sendOnlineMessage(text)
+        if (currentModel == ONLINE_MODEL_GEMINI || currentModel == ONLINE_MODEL_CLAUDE) {
+            sendOnlineMessage(text, currentModel)
             return
         }
 
@@ -334,13 +345,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun sendOnlineMessage(text: String) {
+    private fun sendOnlineMessage(text: String, model: String) {
         if (text.isBlank()) return
         addMessage(text, true)
         binding.inputMessage.text.clear()
         
+        val isClaude = model == ONLINE_MODEL_CLAUDE
+
         // Mensaje de estado inicial
-        addMessage("Connecting to Gemini Cloud...", false)
+        addMessage(if (isClaude) "Connecting to Claude Cloud..." else "Connecting to Gemini Cloud...", false)
         
         isGenerating = true
         updateLoadingState()
@@ -348,12 +361,17 @@ class MainActivity : AppCompatActivity() {
         generationStartTime = System.currentTimeMillis()
 
         CoroutineScope(Dispatchers.IO).launch {
-            // Reemplaza "TU_API_KEY_AQUI" con tu llave real de Google AI Studio
-            val apiKey = "AIzaSyDDAsiiozUtTg3ouX8zEQG6PRJpVhOJYnY"
-            if (apiKey == "TU_API_KEY_AQUI") {
+            // Reemplaza con tus llaves reales
+            val geminiApiKey = "TU_GEMINI_API_KEY_AQUI"
+            val claudeApiKey = "TU_CLAUDE_API_KEY_AQUI"
+
+            val activeApiKey = if (isClaude) claudeApiKey else geminiApiKey
+            val keyName = if (isClaude) "Claude" else "Gemini"
+
+            if (activeApiKey == "TU_API_KEY_AQUI" || activeApiKey == "TU_GEMINI_API_KEY_AQUI" || activeApiKey == "TU_CLAUDE_API_KEY_AQUI") {
                 withContext(Dispatchers.Main) {
                     if (messages.isNotEmpty() && !messages.last().isUser) {
-                        messages.last().text = "System: API Key missing. Please add your Gemini API Key in MainActivity.kt."
+                        messages.last().text = "System: API Key missing. Please add your $keyName API Key in MainActivity.kt."
                         adapter.notifyItemChanged(messages.size - 1)
                     }
                     isGenerating = false
@@ -363,8 +381,13 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
             
-            val client = com.nicolas.llm.api.GeminiApiClient(apiKey)
-            val response = client.generateContent(text)
+            val response = if (isClaude) {
+                val client = com.nicolas.llm.api.ClaudeApiClient(activeApiKey)
+                client.generateContent(text)
+            } else {
+                val client = com.nicolas.llm.api.GeminiApiClient(activeApiKey)
+                client.generateContent(text)
+            }
             
             withContext(Dispatchers.Main) {
                 if (response != null) {
@@ -470,6 +493,7 @@ class MainActivity : AppCompatActivity() {
         }
         modelFiles.clear()
         modelFiles.add(ONLINE_MODEL_GEMINI) // Add online model first
+        modelFiles.add(ONLINE_MODEL_CLAUDE)
         files?.forEach { modelFiles.add(it.name) }
         spinnerAdapter.notifyDataSetChanged()
     }
@@ -563,9 +587,12 @@ class MainActivity : AppCompatActivity() {
                 setPadding(0, 12, 0, 12)
             }
             
-            val isOnline = filename == ONLINE_MODEL_GEMINI
+            val isGemini = filename == ONLINE_MODEL_GEMINI
+            val isClaude = filename == ONLINE_MODEL_CLAUDE
+            val isOnline = isGemini || isClaude
+
             val (safe, _) = if (isOnline) true to "N/A" else isModelSafe(filename)
-            val nick = if (isOnline) "Gemini Cloud" else getModelDisplayName(filename)
+            val nick = if (isGemini) "Gemini Cloud" else if (isClaude) "Claude Cloud" else getModelDisplayName(filename)
             val size = if (isOnline) "---" else getFileSize(filename).replace(" ", "")
             val type = if (isOnline) "TEXT-TO-TEXT" else getModelType(filename)
             
@@ -577,9 +604,9 @@ class MainActivity : AppCompatActivity() {
             }
 
             row.addView(TextView(this).apply { 
-                text = if (isOnline) "Gemini Cloud" else (if (nick == filename) filename.take(10) + "..." else nick.take(12))
+                text = if (isOnline) nick else (if (nick == filename) filename.take(10) + "..." else nick.take(12))
                 gravity = Gravity.START
-                setTextColor(if (isOnline) Color.parseColor("#4285F4") else Color.WHITE)
+                setTextColor(if (isGemini) Color.parseColor("#4285F4") else if (isClaude) Color.parseColor("#D97757") else Color.WHITE)
                 textSize = 12f
             })
             row.addView(TextView(this).apply { text = size; gravity = Gravity.CENTER; setTextColor(Color.WHITE); textSize = 12f })
