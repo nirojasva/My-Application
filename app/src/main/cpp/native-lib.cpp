@@ -25,6 +25,17 @@ Java_com_nicolas_llm_MainActivity_detenerGeneracionNative(JNIEnv* env, jobject t
     ai_stop_requested = true;
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_nicolas_llm_MainActivity_limpiarContextoNative(JNIEnv* env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(model_mutex);
+    if (ai_context != nullptr) {
+        llama_memory_t mem = llama_get_memory(ai_context);
+        if (mem) {
+            llama_memory_clear(mem, true);
+        }
+    }
+}
+
 // Helper to clear KV cache
 void clear_kv_cache(struct llama_context * ctx) {
     llama_memory_t mem = llama_get_memory(ctx);
@@ -238,6 +249,5 @@ Java_com_nicolas_llm_MainActivity_generarRespuestaConImagenNative(JNIEnv* env, j
     }
     llama_sampler_free(smpl);
     llama_batch_free(batch); mtmd_bitmap_free(mt_bmp); mtmd_input_chunks_free(chunks); env->ReleaseStringUTFChars(mensaje_usuario, user_text);
-    return env->NewStringUTF(description.c_str());
     return env->NewStringUTF(description.c_str());
 }

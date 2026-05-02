@@ -3,8 +3,11 @@ package com.nicolas.llm
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
+import android.text.SpannableStringBuilder
+import android.text.style.StyleSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -13,12 +16,32 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
+import java.util.regex.Pattern
 
 class ChatAdapter(private val messages: MutableList<ChatMessage>) :
     RecyclerView.Adapter<ChatAdapter.ChatViewHolder>() {
 
     private val VIEW_TYPE_USER = 1
     private val VIEW_TYPE_AI = 2
+
+    private fun formatMarkdown(text: String): CharSequence {
+        val builder = SpannableStringBuilder(text)
+        val pattern = Pattern.compile("\\*\\*(.*?)\\*\\*")
+        var matcher = pattern.matcher(builder)
+        
+        while (matcher.find()) {
+            val start = matcher.start()
+            val end = matcher.end()
+            val content = matcher.group(1) ?: ""
+            
+            builder.replace(start, end, content)
+            builder.setSpan(StyleSpan(Typeface.BOLD), start, start + content.length, SpannableStringBuilder.SPAN_EXCLUSIVE_EXCLUSIVE)
+            
+            matcher = pattern.matcher(builder)
+            matcher.region(start + content.length, builder.length)
+        }
+        return builder
+    }
 
     override fun getItemViewType(position: Int): Int {
         return if (messages[position].isUser) VIEW_TYPE_USER else VIEW_TYPE_AI
@@ -36,7 +59,7 @@ class ChatAdapter(private val messages: MutableList<ChatMessage>) :
 
     override fun getItemCount() = messages.size
 
-    class ChatViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+    inner class ChatViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         private val txtMessage = view.findViewById<TextView>(R.id.txtMessage)
         private val imgMessage = view.findViewById<ImageView>(R.id.imgMessage)
         private val thoughtContainer = view.findViewById<LinearLayout>(R.id.thoughtContainer)
@@ -75,7 +98,7 @@ class ChatAdapter(private val messages: MutableList<ChatMessage>) :
 
             if (txtMessage != null) {
                 if (message.text.isNotEmpty()) {
-                    txtMessage.text = message.text
+                    txtMessage.text = formatMarkdown(message.text)
                     txtMessage.visibility = View.VISIBLE
                 } else if (!message.isUser && message.image == null && message.thought.isEmpty()) {
                     // Estado de procesamiento (Thinking...)
@@ -98,7 +121,7 @@ class ChatAdapter(private val messages: MutableList<ChatMessage>) :
             if (thoughtContainer != null && btnToggleThought != null && txtThought != null) {
                 if (message.thought.isNotEmpty()) {
                     thoughtContainer.visibility = View.VISIBLE
-                    txtThought.text = message.thought
+                    txtThought.text = formatMarkdown(message.thought)
                     val arrow = if (message.isThoughtExpanded) "▲ Hide" else "▼ Show"
                     btnToggleThought.text = "$arrow Reasoning"
                     txtThought.visibility = if (message.isThoughtExpanded) View.VISIBLE else View.GONE

@@ -22,7 +22,9 @@ android {
             localProperties.load(localPropertiesFile.inputStream())
         }
         val geminiKey = localProperties.getProperty("GEMINI_API_KEY") ?: "TU_API_KEY_AQUI"
+        val groqKey = localProperties.getProperty("GROQ_API_KEY") ?: "TU_API_KEY_AQUI"
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
+        buildConfigField("String", "GROQ_API_KEY", "\"$groqKey\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -42,7 +44,7 @@ android {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                "proguard-rules.pro",
             )
         }
     }

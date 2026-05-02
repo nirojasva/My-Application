@@ -8,6 +8,11 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.net.Uri
+import android.util.Base64
+import android.util.Log
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
@@ -37,9 +42,12 @@ class MainActivity : AppCompatActivity() {
     private val messages = mutableListOf<ChatMessage>()
     private lateinit var adapter: ChatAdapter
     
-    private val modelFiles = mutableListOf<String>()
-    private val ONLINE_MODEL_GEMINI = "Gemini 3.1 Pro (Cloud)"
+    // Modelos Online (Cloud)
+    private val MODEL_GEMINI = "Gemini 3 Flash (Preview)"
+    private val MODEL_GROQ = "Llama 4 Scout (17B/109B)"
+    
     private lateinit var spinnerAdapter: ArrayAdapter<String>
+    private val modelFiles = mutableListOf<String>()
     private var isModelLoading = false
     
     private var generationStartTime: Long = 0
@@ -85,6 +93,44 @@ class MainActivity : AppCompatActivity() {
         setupLengthControl()
         startResourceMonitor()
         refreshModelList()
+        loadChatHistory()
+    }
+
+    private fun saveChatHistory() {
+        val prefs = getSharedPreferences("ChatHistory", Context.MODE_PRIVATE)
+        val jsonArray = JSONArray()
+        messages.forEach { msg ->
+            if (msg.text.isNotEmpty() || msg.thought.isNotEmpty()) {
+                val obj = JSONObject().apply {
+                    put("text", msg.text)
+                    put("isUser", msg.isUser)
+                    put("thought", msg.thought)
+                }
+                jsonArray.put(obj)
+            }
+        }
+        prefs.edit().putString("messages", jsonArray.toString()).apply()
+    }
+
+    private fun loadChatHistory() {
+        val prefs = getSharedPreferences("ChatHistory", Context.MODE_PRIVATE)
+        val jsonStr = prefs.getString("messages", null) ?: return
+        try {
+            val jsonArray = JSONArray(jsonStr)
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                messages.add(ChatMessage(
+                    obj.getString("text"),
+                    obj.getBoolean("isUser"),
+                    null,
+                    obj.optString("thought", "")
+                ))
+            }
+            adapter.notifyDataSetChanged()
+            binding.chatRecyclerView.scrollToPosition(messages.size - 1)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error loading history", e)
+        }
     }
 
     private fun setupLengthControl() {
@@ -113,14 +159,21 @@ class MainActivity : AppCompatActivity() {
                 val view = super.getView(position, convertView, parent) as TextView
                 val filename = modelFiles[position]
                 
-                if (filename == ONLINE_MODEL_GEMINI) {
-                    view.text = "Gemini 3.1 [ONLINE]"
-                    view.setTextColor(Color.parseColor("#4285F4")) // Google Blue
-                } else {
-                    val type = getShortModelType(getModelType(filename))
-                    val displayName = getModelDisplayName(filename)
-                    view.text = "$displayName $type"
-                    view.setTextColor(Color.WHITE)
+                when (filename) {
+                    MODEL_GEMINI -> {
+                        view.text = "Gemini 1.5 [ON]"
+                        view.setTextColor(Color.parseColor("#4285F4"))
+                    }
+                    MODEL_GROQ -> {
+                        view.text = "Llama 3.3 [UNFILTERED]"
+                        view.setTextColor(Color.parseColor("#FFD700")) // Gold
+                    }
+                    else -> {
+                        val type = getShortModelType(getModelType(filename))
+                        val displayName = getModelDisplayName(filename)
+                        view.text = "$displayName $type"
+                        view.setTextColor(Color.WHITE)
+                    }
                 }
                 return view
             }
@@ -128,19 +181,27 @@ class MainActivity : AppCompatActivity() {
                 val view = super.getDropDownView(position, convertView, parent) as TextView
                 val filename = modelFiles[position]
                 
-                if (filename == ONLINE_MODEL_GEMINI) {
-                    view.text = "☁ Gemini 3.1 Pro (Online Cloud)"
-                    view.setTextColor(Color.parseColor("#4285F4"))
-                    view.alpha = 1.0f
-                } else {
-                    val (safe, _) = isModelSafe(filename)
-                    val type = getShortModelType(getModelType(filename))
-                    val size = getFileSize(filename).replace(" ", "")
-                    val displayName = getModelDisplayName(filename)
-                    
-                    view.text = "📁 $displayName ($size) $type${if (!safe) " (!)" else ""}"
-                    view.setTextColor(Color.WHITE)
-                    view.alpha = if (safe) 1.0f else 0.5f
+                when (filename) {
+                    MODEL_GEMINI -> {
+                        view.text = "☁ Gemini 1.5 Flash (Online)"
+                        view.setTextColor(Color.parseColor("#4285F4"))
+                        view.alpha = 1.0f
+                    }
+                    MODEL_GROQ -> {
+                        view.text = "⚡ Llama 3.3 Uncensored (Groq)"
+                        view.setTextColor(Color.parseColor("#FFD700"))
+                        view.alpha = 1.0f
+                    }
+                    else -> {
+                        val (safe, _) = isModelSafe(filename)
+                        val type = getShortModelType(getModelType(filename))
+                        val size = getFileSize(filename).replace(" ", "")
+                        val displayName = getModelDisplayName(filename)
+                        
+                        view.text = "📁 $displayName ($size) $type${if (!safe) " (!)" else ""}"
+                        view.setTextColor(Color.WHITE)
+                        view.alpha = if (safe) 1.0f else 0.5f
+                    }
                 }
                 return view
             }
@@ -153,9 +214,9 @@ class MainActivity : AppCompatActivity() {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 if (position in modelFiles.indices) {
                     val selected = modelFiles[position]
-                    if (selected == ONLINE_MODEL_GEMINI) {
+                    if (selected == MODEL_GEMINI || selected == MODEL_GROQ) {
                         lastSelected = selected
-                        addMessage("System: Switching to Gemini Online Cloud...", false)
+                        addMessage("System: Switching to ${selected.split(" ")[0]}...", false)
                     } else if (selected != lastSelected) {
                         val (safe, reason) = isModelSafe(selected)
                         if (safe) {
@@ -216,12 +277,14 @@ class MainActivity : AppCompatActivity() {
         
         binding.btnClearChat.setOnClickListener {
             AlertDialog.Builder(this)
-                .setTitle("Clear Chat")
-                .setMessage("Are you sure you want to delete all messages?")
-                .setPositiveButton("Clear") { _, _ ->
+                .setTitle("Privacy Wipe & New Chat")
+                .setMessage("This will delete the local chat history and completely wipe the AI's short-term memory (KV Cache). Proceed?")
+                .setPositiveButton("Wipe Everything") { _, _ ->
                     messages.clear()
+                    getSharedPreferences("ChatHistory", Context.MODE_PRIVATE).edit().clear().apply()
+                    limpiarContextoNative() // Limpia memoria RAM del modelo C++
                     adapter.notifyDataSetChanged()
-                    addMessage("System: Chat cleared.", false)
+                    addMessage("System: Memory and history wiped. Private session ready.", false)
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
@@ -290,12 +353,12 @@ class MainActivity : AppCompatActivity() {
     private fun sendMessage(text: String, image: Bitmap?) {
         val currentModel = binding.modelSpinner.selectedItem?.toString() ?: ""
         
-        if (currentModel == ONLINE_MODEL_GEMINI) {
-            sendOnlineMessage(text)
+        if (currentModel == MODEL_GEMINI || currentModel == MODEL_GROQ) {
+            sendOnlineMessage(text, image, currentModel)
             return
         }
 
-        val isVisionModel = getModelType(currentModel) == "TEXT+IMAGE-TO-TEXT"
+        val isVisionModel = getModelType(currentModel) == "TEXT+IMAGE-TO-TEXT" || currentModel == MODEL_GEMINI || currentModel == MODEL_GROQ
 
         if (image != null && !isVisionModel) {
             AlertDialog.Builder(this)
@@ -331,17 +394,18 @@ class MainActivity : AppCompatActivity() {
                 binding.btnSend.isEnabled = true
                 val totalTime = (System.currentTimeMillis() - generationStartTime) / 1000.0
                 binding.txtTimer.text = String.format("Total: %.1fs", totalTime)
+                saveChatHistory()
             }
         }
     }
 
-    private fun sendOnlineMessage(text: String) {
-        if (text.isBlank()) return
-        addMessage(text, true)
+    private fun sendOnlineMessage(text: String, image: Bitmap?, displayName: String) {
+        if (text.isBlank() && image == null) return
+        addMessage(text, true, image)
         binding.inputMessage.text.clear()
         
-        // Mensaje de estado inicial
-        addMessage("Connecting to Gemini Cloud...", false)
+        val shortName = displayName.split(" ")[0]
+        addMessage("Connecting to $shortName...", false)
         
         isGenerating = true
         updateLoadingState()
@@ -349,11 +413,13 @@ class MainActivity : AppCompatActivity() {
         generationStartTime = System.currentTimeMillis()
 
         CoroutineScope(Dispatchers.IO).launch {
-            val apiKey = BuildConfig.GEMINI_API_KEY
+            val isGemini = displayName == MODEL_GEMINI
+            val apiKey = if (isGemini) BuildConfig.GEMINI_API_KEY else BuildConfig.GROQ_API_KEY
+            
             if (apiKey == "TU_API_KEY_AQUI" || apiKey.isBlank()) {
                 withContext(Dispatchers.Main) {
                     if (messages.isNotEmpty() && !messages.last().isUser) {
-                        messages.last().text = "System: API Key missing in local.properties. Please add GEMINI_API_KEY=your_key to local.properties and Rebuild."
+                        messages.last().text = "System: API Key for $shortName missing in local.properties."
                         adapter.notifyItemChanged(messages.size - 1)
                     }
                     isGenerating = false
@@ -363,23 +429,26 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
             
-            val client = com.nicolas.llm.api.GeminiApiClient(apiKey)
-            val response = client.generateContent(text)
+            val response = if (isGemini) {
+                val client = com.nicolas.llm.api.GeminiApiClient(apiKey)
+                client.models.generateContent(
+                    "gemini-3-flash-preview", 
+                    if (text.isBlank()) "Describe this image" else text, 
+                    image
+                )
+            } else {
+                com.nicolas.llm.api.GroqApiClient(apiKey).generateContent(text, image)
+            }
             
             withContext(Dispatchers.Main) {
                 if (response != null) {
-                    if (response.startsWith("Error:")) {
-                        if (messages.isNotEmpty() && !messages.last().isUser) {
-                            messages.last().text = "System: $response"
-                            adapter.notifyItemChanged(messages.size - 1)
-                        }
-                    } else if (messages.isNotEmpty() && !messages.last().isUser) {
+                    if (messages.isNotEmpty() && !messages.last().isUser) {
                         messages.last().text = response
                         adapter.notifyItemChanged(messages.size - 1)
                     }
                 } else {
                     if (messages.isNotEmpty() && !messages.last().isUser) {
-                        messages.last().text = "System: Unknown API Error. Verify your Internet connection."
+                        messages.last().text = "System: Unknown API Error with $shortName."
                         adapter.notifyItemChanged(messages.size - 1)
                     }
                 }
@@ -388,6 +457,7 @@ class MainActivity : AppCompatActivity() {
                 binding.btnSend.isEnabled = true
                 val totalTime = (System.currentTimeMillis() - generationStartTime) / 1000.0
                 binding.txtTimer.text = String.format("Online: %.1fs", totalTime)
+                saveChatHistory()
             }
         }
     }
@@ -469,7 +539,8 @@ class MainActivity : AppCompatActivity() {
             name.endsWith(".gguf") && !name.contains("mmproj", ignoreCase = true) 
         }
         modelFiles.clear()
-        modelFiles.add(ONLINE_MODEL_GEMINI) // Add online model first
+        modelFiles.add(MODEL_GEMINI)
+        modelFiles.add(MODEL_GROQ)
         files?.forEach { modelFiles.add(it.name) }
         spinnerAdapter.notifyDataSetChanged()
     }
@@ -563,23 +634,35 @@ class MainActivity : AppCompatActivity() {
                 setPadding(0, 12, 0, 12)
             }
             
-            val isOnline = filename == ONLINE_MODEL_GEMINI
+            val isGemini = filename == MODEL_GEMINI
+            val isGroq = filename == MODEL_GROQ
+            val isOnline = isGemini || isGroq
+            
             val (safe, _) = if (isOnline) true to "N/A" else isModelSafe(filename)
-            val nick = if (isOnline) "Gemini Cloud" else getModelDisplayName(filename)
+            val nick = when {
+                isGemini -> "Gemini Flash"
+                isGroq -> "Llama Uncensored"
+                else -> getModelDisplayName(filename)
+            }
             val size = if (isOnline) "---" else getFileSize(filename).replace(" ", "")
             val type = if (isOnline) "TEXT-TO-TEXT" else getModelType(filename)
             
             val (input, output) = when {
-                isOnline -> "Internet" to "Text"
+                isGemini -> "Text+Img" to "Text"
+                isGroq -> "Text" to "Text"
                 type == "TEXT-TO-IMAGE" -> "Text" to "Image"
                 type == "TEXT+IMAGE-TO-TEXT" -> "Text+Img" to "Text"
                 else -> "Text" to "Text"
             }
 
             row.addView(TextView(this).apply { 
-                text = if (isOnline) "Gemini Cloud" else (if (nick == filename) filename.take(10) + "..." else nick.take(12))
+                text = nick.take(12)
                 gravity = Gravity.START
-                setTextColor(if (isOnline) Color.parseColor("#4285F4") else Color.WHITE)
+                setTextColor(when {
+                    isGemini -> Color.parseColor("#4285F4")
+                    isGroq -> Color.parseColor("#FFD700")
+                    else -> Color.WHITE
+                })
                 textSize = 12f
             })
             row.addView(TextView(this).apply { text = size; gravity = Gravity.CENTER; setTextColor(Color.WHITE); textSize = 12f })
@@ -697,6 +780,7 @@ class MainActivity : AppCompatActivity() {
         messages.add(ChatMessage(text, isUser, image))
         adapter.notifyItemInserted(messages.size - 1)
         binding.chatRecyclerView.scrollToPosition(messages.size - 1)
+        if (text.isNotEmpty() || image != null) saveChatHistory()
     }
 
     fun recibirPalabra(word: String) {
@@ -705,6 +789,7 @@ class MainActivity : AppCompatActivity() {
                 messages.last().text += word
                 adapter.notifyItemChanged(messages.size - 1)
                 binding.chatRecyclerView.scrollToPosition(messages.size - 1)
+                // Guardamos periódicamente o al final
             }
         }
     }
@@ -719,6 +804,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    external fun limpiarContextoNative()
     override fun onStop() {
         super.onStop()
         // Limpieza de seguridad: borrar rastros temporales al salir
